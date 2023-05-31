@@ -1,0 +1,712 @@
+---
+title: "Nonparametric Statistics Titanic"
+output:
+  pdf_document: default
+  html_document: default
+date: "2023-02-28"
+---
+```{r}
+library(ISLR,quietly = TRUE)
+library(MASS)
+library(Epi)
+library(aod)
+library(dplyr,quietly=TRUE)
+library("dplyr")
+library(ggplot2,quietly=TRUE)
+library("grid")
+library("gridExtra")
+library("caret")
+library(tidyverse)
+library(nortest)
+library(knitr)
+#library(lasso2)
+library("ggfortify")
+library("reshape2")
+library(faraway)
+library(leaps)
+library(stats)
+library(robusTest)
+library(plyr)
+library(scales)
+```
+
+
+# Data import and preprocessing
+
+Firstly, we import the file and remove the columns from the dataframe, that we do not want to consider:
+```{r}
+df = read.csv("C:/Users/pc/Desktop/NonParaStat/dataTitanic.csv", header=TRUE, stringsAsFactors=FALSE)
+
+df$Cabin = NULL
+df$Ticket = NULL
+df$X = NULL
+df$Name = NULL
+
+
+df
+```
+We can see, that our dataset consists of 9 columns, representing different kind of information about Titanic pasangers, and 1,309 rows, representing every single passanger. 
+
+Let us check out the names of the columns. As mentioned before, our dataframe consists of 9 variables with different information about Titanic passangers:
+```{r}
+names(df)
+
+#table(df$Embarked)
+#table(df$Pclass)
+#table(df$SibSp)
+#table(df$Parch)
+```
+ where,
+ 
+"PassengerId" -- id of the passanger
+
+"Survived" -- if person survived,or not (1 - "yes", "0" - no)  
+
+"Pclass"  -- class of the ticket (1 - 1st class, 2 - 2nd class, 3 - 3rd class) 
+
+"Sex"  --  passanger's sex ("male", "female")      
+
+"Age"   --  passanger's age (continuous data)   
+
+"SibSp"   -- number of spouses and/or siblings the passenger had on board with him/her (0, 1, 2, 3, 4, 5, 8)   
+
+"Parch"   --  number of parents and/or children the passenger had with him/her on board (0, 1, 2, 3, 4, 5, 6, 9)  
+
+"Fare"  --  price, payed for the tickets by passanger (continuous variable) 
+
+"Embarked"   --  port of embarkation that the passenger took ("Cherbourg", "Queenstown", "Southampton")
+
+
+We transform the qualitative variables, "PassengerId", "Survived", "Pclass", "Sex", "SibSp", "Parch", "Embarked" variables, into factor or categorical variable:
+```{r}
+df$PassengerId = as.factor(df$PassengerId)
+df$Survived = as.factor(df$Survived)
+df$Pclass = as.factor(df$Pclass)
+df$Sex = as.factor(df$Sex)
+df$SibSp = as.factor(df$SibSp)
+df$Parch = as.factor(df$Parch)
+df$Embarked = as.factor(df$Embarked)
+```
+
+The summary of the dataframe:
+```{r}
+summary(df)
+```
+Now let's check if we have any missing data in our dataframe. Thankfully, we do not have any missing data.
+```{r}
+sum(is.na(df))
+```
+#Statistical non-parametic tests
+
+In this work we want to investigate the "Survived" variable, and how the other variables are connected with it or if they have any kind of influence on the fact if person have survived or not.  
+
+```{r}
+ggplot(df, aes(x = as.factor(Survived))) +
+  geom_bar(fill = "steelblue", aes(y = (..count..)/sum(..count..))) +  theme_bw() +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = -0.25) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Distribution of passangers who Not Survived (0) and Survived (1)", y = "Percent", x = "0 - Not Survived, 1 - Survived") +
+  theme(plot.title = element_text(face = "bold")) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+n0=sum(df$Survived==1)
+n1=sum(df$Survived==0)
+n0
+n1
+```
+
+
+##Statistical tests to check the equality of the distributions
+In this part we want to separate a set of passangers on Titanic to the ones who survied and the ones, who did not and see if the "Age", and then "Fare", variables have the same distribution in both of the groups. If they do, it will mean, that age of passanger (the price they payed for the tickes) did nor influence the survival of the person, if not - vice versa. 
+###"Age" and "Survived"
+
+```{r}
+ggplot(df, aes(Survived, Age)) + geom_boxplot(aes(fill = Survived)) + labs(title="Boxplot of Age according to Survived info",x="Survived", y = "Age") + theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+```{r}
+
+X=df$Age[df$Survived==1]
+Y=df$Age[df$Survived==0]
+
+summary(X)
+quantile(X,probs=c(0.01,0.25,0.5,0.75,0.99))
+
+summary(Y)
+quantile(Y,probs=c(0.01,0.25,0.5,0.75,0.99))
+```
+```{r}
+mu <- ddply(df, "Survived", summarise, grp.mean=mean(Age))
+
+ggplot(df, aes(x=Age, fill=Survived, color=Survived)) +
+  geom_histogram(position="identity", alpha=0.5) +
+  labs(title="Histogram of Age according to Survived info ",x="Age", y = "Number of people") + 
+  theme(plot.title = element_text(face = "bold")) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  geom_vline(data=mu, aes(xintercept=grp.mean, color=Survived), linetype="dashed")
+```
+
+To apply further tests, we firstly want to check if our data has gaussian distribution, because some of the tests (ex. Student t tests) require data to be normally distributed. 
+By the results of Shapiro and Lillie tests we confirm, that none of the data is gaussian distributed (p-val $< 0.05 =>$ not gaussian distribution).
+```{r}
+## Age continuous quantitative, Survived is a qualitative variable coded by 0 and 1
+shapiro.test(df$Age[df$Survived==1]) # not gaussien
+shapiro.test(df$Age[df$Survived==0]) # not gaussien
+lillie.test(df$Age[df$Survived==1]) # not gaussien
+lillie.test(df$Age[df$Survived==0]) # not gaussien
+```
+####Mean equality check
+
+Thus, we cant't use Student t test to check the equality of the means of out distributions. Instead we will apply CLT for this:
+```{r}
+T=(mean(Y)-mean(X))/sqrt(var(X)/n0+var(Y)/n1)
+pvalue=2*(1-pnorm(abs(T),0,1))
+pvalue
+```
+Having p-value quite small, we reject the null-hypothesis H0 about the equality of the means and conclude, that the expectations are different.
+
+
+####Distributions equality check
+
+Followingly, we will use Kolmogorov-Smirnov and Wilcoxon tests to see if the distributions of the Age of people who survived, and who did not, are the same or not:
+```{r}
+ks.test(df$Age[df$Survived==1],df$Age[df$Survived==0]) # test de comparaison des fonctions de répartitions empiriques? Concl: on rejette l'hypothèse H0: les fonctions de répartition de lwt sont différentes dans les deux groupes définis par la variable low
+wilcox.test(df$Age[df$Survived==1],df$Age[df$Survived==0],paired=FALSE) #fonction de R mal calibré
+wilcoxtest(df$Age[df$Survived==1],df$Age[df$Survived==0],paired=FALSE, ties.break = "random")
+```
+
+Considering the small p-values that all the tests gave us, we conclude, that we reject H0 hypohesis, and say, that the distributions are not the same, meaning, that there is an influence of age on survival data.
+
+
+###"Fare" and "Survived"
+
+We want to conduct the same tests for the "Fare" variable, trying to understand if the price of a ticket could have influenced survival:
+```{r}
+ggplot(df, aes(Survived, Fare)) + geom_boxplot(aes(fill = Survived)) + labs(title="Boxplot of Fare according to Survived info",x="Survived", y = "Fare") + theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+
+X=df$Fare[df$Survived==1]
+Y=df$Fare[df$Survived==0]
+
+summary(X)
+quantile(X,probs=c(0.01,0.25,0.5,0.75,0.99))
+
+summary(Y)
+quantile(Y,probs=c(0.01,0.25,0.5,0.75,0.99))
+```
+```{r}
+mu <- ddply(df, "Survived", summarise, grp.mean=mean(Fare))
+
+ggplot(df, aes(x=Fare, fill=Survived, color=Survived)) +
+  geom_histogram(position="identity", alpha=0.5) +
+  labs(title="Histogram of Fare according to Survived info ",x="Fare", y = "Number of people") + theme(plot.title = element_text(face = "bold")) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_vline(data=mu, aes(xintercept=grp.mean, color=Survived), linetype="dashed")
+```
+
+Although our data does not look gaussian at all, we still check if our data has gaussian distribution or not to have a numerical proof of the conclusion 
+By the results of Shapiro and Lillie tests we confirm, that none of the data is gaussian distributed (p-val $< 0.05 =>$ not gaussian distribution).
+```{r}
+## Age continuous quantitative, Survived is a qualitative variable coded by 0 and 1
+shapiro.test(df$Fare[df$Survived==1]) # not gaussien
+shapiro.test(df$Fare[df$Survived==0]) # not gaussien
+lillie.test(df$Fare[df$Survived==1]) # not gaussien
+lillie.test(df$Fare[df$Survived==0]) # not gaussien
+```
+
+####Mean equality check
+
+Here also we cant't use Student t test to check the equality of the means of our distributions. Instead we will apply CLT for this:
+```{r}
+T=(mean(Y)-mean(X))/sqrt(var(X)/n0+var(Y)/n1)
+pvalue=2*(1-pnorm(abs(T),0,1))
+pvalue
+```
+Having p-value quite small, we reject the null-hypothesis H0 about the equality of the means and conclude, that the expectations are different.
+
+
+####Distributions equality check
+
+Followingly, we will use Kolmogorov-Smirnov and Wilcoxon tests to see if the distributions of the Age of people who survived, and who did not, are the same or not:
+```{r}
+ks.test(df$Fare[df$Survived==1],df$Fare[df$Survived==0]) # test de comparaison des fonctions de répartitions empiriques? Concl: on rejette l'hypothèse H0: les fonctions de répartition de lwt sont différentes dans les deux groupes définis par la variable low
+wilcox.test(df$Fare[df$Survived==1],df$Fare[df$Survived==0],paired=FALSE) #fonction de R mal calibré
+wilcoxtest(df$Fare[df$Survived==1],df$Fare[df$Survived==0],paired=FALSE, ties.break = "random")
+```
+
+Considering the small p-values that all the tests gave us, we conclude, that we reject H0 hypohesis, and say, that the distributions are not the same.
+
+
+
+##Statistical tests to check the independence of variables
+
+###"Survived" and "Pclass"
+
+Firstly, let us see the distribution of classes depending on the fact if person survived, or not:
+
+```{r}
+ggplot(df, aes(x= Pclass ,  group=Survived)) +
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "pourcentage", fill="Pclass") +
+    facet_grid(~df$Survived) +
+    scale_y_continuous(labels = scales::percent) + labs(title = "Conditional distribution of Passangers ticket Class on Survival information", y = "Percent", x = "Pclass") +
+  theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+Now we will do a Chi-Square test, that is used to determine if there is a significant dependence between two categorical variables. Zero hypothesis, H0: the two variables are independent.
+```{r}
+chisq.test(df$Survived, df$Pclass, correct = F)
+chisq.test(df$Survived, df$Pclass,correct=F)$observed #observed counts
+chisq.test(df$Survived, df$Pclass,correct=F)$expected #expected counts under the null
+```
+We have a high chi-squared value and a p-value of less than 0.05 significance level. So we reject the null hypothesis and conclude that Class and Survival have a significant relationship.
+
+Fisher test is another independence test, used to determine if there is a significant relationship between two categorical variables. It has a zero hypothesis, H0: the two variables are independent.
+```{r}
+fisher.test(df$Survived, df$Pclass)
+```
+Here we also have a small  p-value of less than 0.05 significance level. So we reject the null hypothesis and conclude that Class and Survival have a significant relationship.
+
+###"Survived" and "Sex"
+
+```{r}
+ggplot(df, aes(x= Sex ,  group=Survived)) +
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "pourcentage", fill="Sex") +
+    facet_grid(~df$Survived) +
+    scale_y_continuous(labels = scales::percent) + labs(title = "Conditional distribution of Sex on Survival information", y = "Percent", x = "Sex") +
+  theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+chisq.test(df$Survived, df$Sex, correct = F)
+chisq.test(df$Survived, df$Sex,correct=F)$observed
+chisq.test(df$Survived, df$Sex,correct=F)$expected
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Sex and Survival have a significant relationship.
+```{r}
+fisher.test(df$Survived, df$Sex)
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Sex and Survival have a significant relationship.
+
+###"Survived" and "SibSp"
+
+```{r}
+df = read.csv("C:/Users/pc/Desktop/NonParaStat/dataTitanic.csv", header=TRUE, stringsAsFactors=FALSE)
+
+df$Cabin = NULL
+df$Ticket = NULL
+df$X = NULL
+df$Name = NULL
+```
+
+```{r}
+table(df$SibSp)
+```
+
+
+```{r}
+df$SibSp_class[df$SibSp < 1]="SibSp_1"
+df$SibSp_class[df$SibSp >= 1 & df$SibSp < 4]="SibSp_2"
+df$SibSp_class[df$SibSp >= 4 ]="SibSp_3"
+attach(df,warn.conflicts=FALSE)
+```
+
+
+```{r}
+ggplot(df, aes(x= SibSp_class ,  group=Survived)) +
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "pourcentage", fill="SibSp_class") +
+    facet_grid(~df$Survived) +
+    scale_y_continuous(labels = scales::percent) + labs(title = "Conditional distribution of Number of spouses and sibilings on Survival information", y = "Percent", x = "SibSp_class") +
+  theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+chisq.test(df$Survived, df$SibSp_class, correct = F, simulate.p.value = TRUE)
+chisq.test(df$Survived, df$SibSp_class,correct=F, simulate.p.value = TRUE)$observed
+chisq.test(df$Survived, df$SibSp_class,correct=F, simulate.p.value = TRUE)$expected
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that SibSp_class and Survival have a significant relationship.
+
+```{r}
+fisher.test(df$Survived, df$SibSp_class)
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that SibSp_class and Survival have a significant relationship.
+
+###"Survived" and "Parch"
+
+```{r}
+table(df$Parch)
+```
+
+
+```{r}
+df$Parch_class[df$Parch < 1]="SibSp_1"
+df$Parch_class[df$Parch >= 1  & df$Parch < 4]="SibSp_2"
+df$Parch_class[df$Parch >= 4]="SibSp_3"
+attach(df,warn.conflicts=FALSE)
+```
+
+
+```{r}
+ggplot(df, aes(x= Parch_class ,  group=Survived)) +
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "pourcentage", fill="Parch_class") +
+    facet_grid(~df$Survived) +
+    scale_y_continuous(labels = scales::percent) + labs(title = "Conditional distribution of Number of parents and children on Survival info", y = "Percent", x = "Parch_class") +
+  theme(plot.title = element_text(face = "bold")) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+chisq.test(df$Survived, df$Parch_class, correct = F, simulate.p.value = TRUE)
+chisq.test(df$Survived, df$Parch_class,correct=F, simulate.p.value = TRUE)$observed
+chisq.test(df$Survived, df$Parch_class,correct=F, simulate.p.value = TRUE)$expected
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Parch_class and Survival have a significant relationship.
+
+```{r}
+fisher.test(df$Survived, df$Parch_class)
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Parch_class and Survival have a significant relationship.
+
+
+###"Survived" and "Embarked"
+
+```{r}
+ggplot(df, aes(x= Embarked ,  group=Survived)) +
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes( label = scales::percent(..prop..),
+                   y= ..prop.. ), stat= "count", vjust = -.5) +
+    labs(y = "pourcentage", fill="Embarked") +
+    facet_grid(~df$Survived) +
+    scale_y_continuous(labels = scales::percent) + labs(title = "Conditional distribution of Embarkation ports on Survival data", y = "Percent", x = "Embarked") 
+```
+
+```{r}
+chisq.test(df$Survived, df$Embarked, correct = F)
+chisq.test(df$Survived, df$Embarked,correct=F)$observed
+chisq.test(df$Survived, df$Embarked,correct=F)$expected
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Embarked and Survival have a significant relationship.
+```{r}
+fisher.test(df$Survived, df$Embarked)
+```
+p-value less than 0.05 significance level then reject the null hypothesis and conclude that Embarked and Survival have a significant relationship.
+
+
+#Building the GLM
+
+To build a proper model for predicting the "Survived" variable, we will use forward stepwise algorithm to choose the most significantly important predictors.
+
+Firstly, we create a model with just an intersection.
+
+```{r}
+model.a=glm(Survived ~ 1,family=binomial, data = df)
+summary(model.a)
+```
+Now we want to add one predictor, which is going to be significant and would predict better, than others. After some tests, we notice that adding "Sex" variable (which is significant looking at the small p-value) to our glm performs better, than adding the others, basing on the Residual deviance parameter, which  tells us how well the response variable can be predicted by the specific model that we fit. The lower the value, the better the model is able to predict the value of the response variable. 
+```{r}
+model.b=glm(Survived ~ Sex, family=binomial, data = df)
+summary(model.b)
+```
+Now we perform ANOVA test to compare the model without any predictors and with the one, that we added.
+As we can see, the result shows a Df of 1 (indicating that the more complex model has one additional parameter), and a very small p-value (< .001). This means that adding the "Sex" to the model did lead to a significantly improved fit over the model.a.
+```{r}
+anova(model.a, model.b,test="Chisq")
+```
+Further we will do the same procedure, adding new variable, that shows better results of prediction, ANOVA testing with the previous model and choose the best one.
+```{r}
+model.c=glm(Survived ~ Sex + Pclass, family=binomial, data = df)
+summary(model.c)
+```
+```{r}
+anova(model.b, model.c,test="Chisq")
+```
+```{r}
+model.d=glm(Survived ~ Sex + Pclass + Age, family=binomial, data = df)
+summary(model.d)
+```
+```{r}
+anova(model.c, model.d,test="Chisq")
+```
+```{r}
+model.e=glm(Survived ~ Sex + Pclass + Age + SibSp , family=binomial, data = df)
+summary(model.e)
+```
+```{r}
+anova(model.d, model.e,test="Chisq")
+```
+The model.e turns out to show the best results, comparing to the others.
+Now we will compare it with the model, having all variables as predictors.
+```{r}
+fit_logistic_1 = glm(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, 
+                   family = "binomial", data=birthwt)
+summary(fit_logistic_1)
+```
+We can see quite big p-value, meaning, that the model.e shows better predicting results.
+```{r}
+anova(model.e, fit_logistic_1 ,test="Chisq")
+```
+In R, stepAIC is one of the most commonly used search method for feature selection. We try to keep on minimizing the stepAIC value to come up with the final set of features. “stepAIC” does not necessarily mean to improve the model performance, however, it is used to simplify the model without impacting much on the performance. So AIC quantifies the amount of information loss due to this simplification. AIC stands for Akaike Information Criteria.
+
+We want to choose the model with the smallest AIC value, which is model.e in our case.
+```{r}
+stepAIC(model.e)
+```
+```{r}
+stepAIC(fit_logistic_1)
+```
+```{r}
+library(ROCR,quietly = TRUE)
+
+predictions = predict(model.e,type = "response")
+pred = prediction( predictions, df$Survived)
+perf = performance( pred, "tpr", "fpr" )
+
+
+plot( perf )
+```
+
+```{r}
+ROC_auc <- performance( pred,"auc")
+AUC <- ROC_auc@y.values[[1]]
+print(AUC)
+```
+
+
+##Density Estimation
+
+In this part of the project, we are interested in estimating the density of the variables. We will be using three type of estimators, the hidtograms, kernel functions and regression functions.
+
+### Estimation using histograms
+We choose the variable age and will be estimating the density by Histogram first. In order to have the distribution fo the observations, we will use the function hist. We start by plotting two histograms one by frequency and the other with probabilities.
+
+```{r}
+par(mfrow = c(1,2))
+hist(Age, col="cornflowerblue", breaks = 5, main = "histogramme en effectifs", xlab= "5 breaks") 
+
+hist(Age,col="cornflowerblue", prob=T, breaks = 5, main = "histogramme en densité de probabilité", xlab= "5 breaks")
+```
+The first hisotgram is the one with frequency where we can see the frequency of the variable Age and see that the Ages between twenty and forty were the most for the people on the titanic and the second histogram is the one which shows observations in probabilities and which as well show the same results.
+
+Break argument corresponds to the number of bins used to construct the histogram. More specifically, breaks specifies the cut-off points used to delimit the bins. If breaks is an integer, it indicates the desired number of bins. If breaks is a vector of cut-off points, it defines the boundaries of the bins.
+We will now vary this argument between 5, 10 and 15.
+
+```{r}
+par(mfrow = c(2,2))
+hist(Age,col="cornflowerblue", prob=T, breaks = 5, main = "histogramme en densité de probabilité", xlab= "5 breaks")
+
+hist(Age,col="cornflowerblue", prob=T, breaks = 10, main = "histogramme en densité de probabilité", xlab= "10 breaks")
+
+hist(Age,col="cornflowerblue", prob=T, breaks = 30, main = "histogramme en densité de probabilité", xlab= "30 breaks")
+
+```
+The histograms show the distribution of the variable "Age" using different numbers of breaks for grouping the data. The x-axis represents the range of ages, and the y-axis represents the frequency or density of the observations within each bin.
+
+The first histogram with 5 breaks shows a relatively smooth distribution, with a peak around the age of 30 and a gradual decrease in density towards older ages.
+
+The second histogram with 10 breaks shows a similar pattern, but with more detail, revealing some gaps in the distribution (for example, around ages 28-32 ) that were not visible in the first histogram.
+
+The third histogram with 30 breaks shows even more detail, with some small peaks and valleys in the distribution that were not visible before. However, it also shows some noise or fluctuations that may be due to sampling variability.
+
+
+We will now try with greater number of breaks.
+```{r}
+hist(Age,col="cornflowerblue",proba=T, breaks=299, main="Histogramme en densité de probabilité",
+     xlab="299 breaks") #un baton par observation=> NON
+par(mfrow=c(1,3))
+hist(Age,col="cornflowerblue",proba=T, breaks=70, main="Histogramme en densité de probabilit",
+     xlab="70 breaks")
+hist(Age,col="cornflowerblue",proba=T, breaks=30, main="Histogramme en densité de probabilité",
+     xlab="30 breaks")
+hist(Age,col="cornflowerblue",proba=T, breaks=3, main="Histogramme en densité de probabilité",
+     xlab="3 breaks")
+```
+
+The first histogram has 299 breaks, which means there is one bar for each observation. This histogram is not very informative since we cannot see any patterns in the data. The next three histograms have 70, 30, and 3 breaks respectively.
+The histogram with 70 breaks shows more information about the data distribution. We can see that the distribution is skewed to the right with most passengers being in their 20s and 30s. The histogram with 30 breaks provides even more information about the distribution of the data, and we can see more clearly that the distribution is skewed to the right. Finally, the histogram with only 3 breaks shows the general shape of the distribution, but it does not provide much detail about the distribution.
+
+Overall, the choice of the number of breaks in a histogram depends on the amount of detail we want to see in the data and the overall shape of the distribution.
+By varying the "breaks" argument, we can see that the choice of the number of classes affects the appearance of the histogram. A too small number of classes can mask characteristics of the distribution, while too many can introduce noise.
+
+We will now repeat our studies with ggplot2.
+```{r}
+library(ggplot2)
+
+ggplot() + geom_histogram(aes(x=Age, y=(..count..)*100/sum(..count..),color="red", fill="red"), fill="red", alpha=.4, colour="red", data=df,bins=14)+
+  coord_cartesian(xlim = c(0,110))+ xlab("Age")+ ylab("pourcentage (%) ")+
+  labs(title="histogramme de la variable Age ",x="Age", y = "Pourcentage") + theme(plot.title = element_text(face = "bold"))+ theme(plot.title = element_text(hjust = 0.5))
+
+ggplot() + geom_histogram(aes(x=Age, y=(..count..)*100/sum(..count..),color="red", fill="red"), fill="red", alpha=.4, colour="red", data=df,bins=20)+
+  coord_cartesian(xlim = c(0,110))+ xlab("Age")+ ylab("pourcentage (%) ")+
+  labs(title="histogramme de la variable Age ",x="Age", y = "Pourcentage") + theme(plot.title = element_text(face = "bold"))+ theme(plot.title = element_text(hjust = 0.5))
+```
+In both histograms, the x-axis represents the age of the passengers and the y-axis represents the percentage of passengers in each age range. The bars in the histogram represent the number of passengers in each age range.
+
+The first histogram has 14 bins or breaks, while the second has 20 bins. The number of bins determines the granularity of the histogram, with a higher number of bins resulting in a more detailed view of the distribution of the variable.
+
+Both histograms show a peak in the number of passengers in their early 20s, with a gradual decrease in the number of passengers as age increases. The second histogram with more bins provides a more detailed view of the distribution and highlights some smaller peaks in the number of passengers in their 30s and 50s.
+
+
+Our step now will be adding to our histogram a uni-dimensional representation of the observations with the function rug.
+
+```{r}
+hist(Age, col="cornflowerblue", breaks = 5, main = "histogramme en densité avec representation rug", xlab= "5 breaks") 
+rug(Age)
+```
+The rug plot shows the actual location of each observation as a tick mark along the horizontal axis. This can be useful to get a sense of the overall distribution and to identify any outliers or unusual patterns in the data.
+
+We compare now the function truehist() to hist().
+```{r}
+
+library(MASS)
+
+# Histogramme avec hist()
+par(mfrow=c(1,2))
+hist(Age, col="cornflowerblue", breaks = 5, main = "Histogramme avec hist()", xlab= "5 breaks") 
+
+# Histogramme avec truehist()
+truehist(Age, col="pink", main="Histogramme avec truehist()", xlab="3 breaks")
+
+# Autres options de truehist()
+par(mfrow=c(2,2))
+truehist(Age, col="pink", main="Option 'density'", xlab="3 breaks", density=TRUE)
+
+truehist(Age, col="pink", main="Option 'border'", xlab="3 breaks", border="white")
+
+truehist(Age, col="pink", main="Option 'plot.n'" , xlab="3 breaks", plot.n=FALSE)
+
+truehist(Age, col="pink", main="Option 'xlim'", xlab="3 breaks", xlim=c(40, 110))
+
+```
+The output of truehist() is similar to that of hist(), but with a few additional components. In figure 26, we can see the plot by the truehist() function while trying different options of it such as density which provides an estimate of the underlying density of the data, which is useful for visualizing the shape of the distribution and the border, the limit on x and plot.n.
+Overall, the truehist() function provides a more informative and visually appealing alternative to the basic hist() function.
+
+
+##Estimation of density with the kernel
+
+The density function provides a kernel density estimate of the density of observations. In other words, it estimates the probability density function of a random variable based on a set of observed data. It does this by placing a kernel function on each observation and summing these functions to estimate the underlying probability density function. The resulting density estimate can be plotted as a smooth curve that shows the shape of the underlying distribution.
+
+```{r}
+dens <- density(df$Age)
+plot(dens)
+```
+The resulting plot shows the estimated density of the Age variable, which represents the probability density function of the variable. The x-axis represents the values of the variable, and the y-axis represents the estimated density values. The resulting curve shows the shape of the estimated density, which can provide insights into the distribution of the variable.
+
+This code uses the default kernel function which is the Gaussian kernel, so We will vary the kernel argument now.
+
+```{r}
+par(mfrow=c(1,3))
+dens <- density(df$Age, kernel = "epanechnikov")
+plot(dens)
+
+dens <- density(df$Age, kernel = "rectangular")
+plot(dens)
+
+dens <- density(df$Age, kernel = "cosine")
+plot(dens)
+```
+
+The first plot uses the Epanechnikov kernel, which is a type of quadratic kernel that is more efficient than the Gaussian kernel when the sample size is large. The second  uses the rectangular and the third uses the cosine kernel, which is a type of kernel that is symmetric and oscillating.
+Every shape of these density curves reflects the shape of the kernel function.
+
+Now, we will be varying instead the bandwidth (bw) argument which is used to control the smoothness of the density estimate.It determines the width of the kernel function and affects how much weight is given to nearby observations.
+
+
+```{r}
+dens <- density(df$Age, bw = 0.2)
+plot(dens)
+
+dens <- density(df$Age, bw = 0.5)
+plot(dens)
+```
+As we can see, the density curve with a larger bw value (0.5) is smoother, while the one with a smaller bw value (0.2) is more jagged and has more detail. The choice of bw value depends on the data and the desired level of smoothness in the density estimate.
+A smaller bandwidth will result in a more detailed (less smooth) density estimate, which can be sensitive to local fluctuations in the data. A larger bandwidth will result in a smoother density estimate that is less sensitive to local fluctuations, but may miss important features of the data.
+
+The optimal bandwidth value depends on the characteristics of the data and the purpose of the analysis. If the bandwidth is too small, the density estimate may overfit the data, while if it is too large, it may underfit the data. There are various methods for selecting the optimal bandwidth, such as the rule-of-thumb, cross-validation, and maximum likelihood. We will consider cross validation.
+ 
+We consider a grid of values of $h \in [0, 8]$ and consider the sample as composed of 5 packets. For each value of h and each packet of observations, we want to calculate the Gaussian kernel estimator obtained for this value of h and using the observations outside the considered packet. Then, we want to estimate the error committed by this estimator on the observations of the considered packet. Next, wetake the average these errors over the 5 packets. And finally, we select the value of h that gives the lowest average error.
+
+### Estimation par regression
+
+In this part, we will estimate the density by regression. We will use different estimator; the first one is the Nadaraya-Watson estimator with different bandwidths using the ksmooth function using different bandwidths that are 0.1, 1, and 5.
+
+```{r}
+# Estimation de Nadaraya-Watson avec différentes fenêtres
+r_NW_1 <- ksmooth(Age, Survived, kernel = "normal", bandwidth = 0.1)
+r_NW_2 <- ksmooth(Age, Survived, kernel = "normal", bandwidth = 1)
+r_NW_3 <- ksmooth(Age, Survived, kernel = "normal", bandwidth = 5)
+
+# Tracé des courbes
+plot(Age, Survived, xlab = "Age", ylab = "Survived")
+lines(r_NW_1, col = "red")
+lines(r_NW_2, col = "blue")
+lines(r_NW_3, col = "green")
+legend("topright", legend = c("Bandwidth = 0.1", "Bandwidth = 1", "Bandwidth = 5"), col = c("red", "blue", "green"), lty = 1)
+```
+The curves obtained with different bandwidths for the Nadaraya-Watson estimator show how the choice of bandwidth affects the smoothing of the data.
+
+When the bandwidth is small 0.1, the red curve is very wiggly and follows the data points closely. This can lead to overfitting and capture noise in the data.
+When the bandwidth is larger 1, the blue curve is smoother and captures the trend in the data without fitting the noise. hen the bandwidth is even larger 5, the green curve is even smoother and captures the overall trend in the data, but may miss some of the details and variations in the data.
+
+Now, we will estimate the regression function with local polynomials.
+```{r}
+# Estimation de la fonction de régression par polynômes locaux
+r_lowess <- lowess(Survived ~ Age, f = 0.5)
+
+# Tracé de la courbe
+plot(Age, Survived, xlab = "Age", ylab = "Survived")
+lines(r_lowess, col = "red")
+
+```
+The resulting curve shows a smooth fit to the data due to the fact that the local polynomial regression takes into account the curvature of the data, which results in a more flexible and accurate estimate. However, the choice of smoothing parameter f is important as too much smoothing can result in oversmoothing and too little smoothing can result in overfitting.
+
+We now estimate the regression function using the loess method, with a smoothing parameter (span) of 0.75, which determines the degree of smoothing of the estimate. 
+
+```{r}
+r_loess <- loess(Survived ~ Age, span=0.75)
+plot(Age, Survived, xlab = "Age", ylab = "Survived")
+
+lines(predict(r_loess), col="red")
+
+```
+We see a smooth curve that captures the general trend in the data, similar to the lowess estimator. The span parameter controls the degree of smoothing and in this case, a value of 0.75 was used, which resulted in a moderate degree of smoothing. 
+
+Now, we use the cubic splines to estimate the regression function. The function smooth.spline is used to fit the spline to the data, and the predict function is used to obtain the estimated values of the regression function on a grid of points. In this case, df = 5 specifies that the spline should have 5 degrees of freedom.
+
+```{r}
+spline_fit <- smooth.spline(x = df$Age, y = df$Survived, df = 5)
+plot(df$Age, df$Survived, main = "Survie en fonction de l'âge", xlab = "Âge", ylab = "Survie")
+lines(predict(spline_fit))
+legend("bottomright", legend = "Spline cubique (5 nœuds)", col = "blue", lty = 1)
+
+```
+
+
+The cubic spline with 5 knots fits the data well, capturing the general trend of the data without overfitting. As we increase the number of knots, the curve would become more flexible and fit the data more closely, but it may also start to capture noise in the data rather than the underlying trend. On the other hand, decreasing the number of knots could lead to an oversimplified model that does not capture important features of the data. In general, the choice of the number of knots depends on the complexity of the data.
+
+We will compare the estimators by plotting each of the estimated curves on the same graph and compare their shapes and levels of smoothing.
+
+```{r}
+plot(df$Age, df$Survived, main = "Survie en fonction de l'âge", xlab = "Âge", ylab = "Survie")
+lines(ksmooth(df$Age, df$Survived, kernel = "normal", bandwidth = 3), col = "red", lty = 1)
+lines(lowess(df$Age, df$Survived), col = "green", lty = 2)
+lines(predict(r_loess), col = "purple", lty = 3)
+lines(predict(spline_fit), col = "blue", lty = 4)
+legend("bottomright", legend = c("Nadaraya-Watson", "Polynômes locaux", "Polynômes locaux avancés", "Spline cubique (5 nœuds)"), col = c("red", "green", "purple", "blue"), lty = 1:4)
+
+```
+
+The shapes of the curves differ slightly. The Nadaraya-Watson estimator with a normal kernel and bandwidth of 3 appears to have a smoother curve compared to the other three methods. The local polynomial regression using the lowess method seems to have more fluctuations and a less smooth curve. The local polynomial regression using the loess method with a span of 0.75 is smoother than the lowess method, but still shows some fluctuations. The cubic spline with 5 knots is also relatively smooth but has some sharp turns between the knots.
+
+Overall, the choice of non-parametric regression method and tuning parameters should depend on the specific characteristics of the data and the research question.
