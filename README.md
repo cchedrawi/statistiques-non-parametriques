@@ -1,1 +1,3 @@
 # statistiques-non-parametriques
+
+This project employs various statistical tests, including non-parametric methods, to investigate relationships and dependencies of different variables. Initial explorations involve visualizing distributions and conducting tests to check equality and independence. The study delves into non-parametric density estimation techniques such as histograms, kernel density estimation, and regression functions, exploring the impact of different parameters on the resulting curves. Additionally, it includes building a Generalized Linear Model (GLM) for predicting survival and evaluates model fit using ROC curves. The density estimation section employs diverse approaches, providing a comprehensive analysis of the dataset.
